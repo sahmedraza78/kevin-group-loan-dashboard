@@ -27,8 +27,18 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .entity-tab.active{background:var(--bg-header);color:#fff;}
 .period-filters{display:flex;gap:10px;align-items:center;margin-bottom:var(--gap);flex-wrap:wrap;}
 .period-filters label{font-size:11.5px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;font-weight:600;}
-.period-filters select{padding:8px 12px;border-radius:8px;border:1px solid #dfe3e8;background:var(--bg-card);font-size:13px;color:var(--text-primary);font-weight:600;cursor:pointer;}
-.period-filters select:disabled{opacity:.5;cursor:default;}
+.ms-wrap{position:relative;display:inline-block;}
+.ms-btn{padding:8px 12px;border-radius:8px;border:1px solid #dfe3e8;background:var(--bg-card);font-size:13px;color:var(--text-primary);font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px;min-width:140px;max-width:220px;justify-content:space-between;}
+.ms-btn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ms-btn:after{content:'\25BE';font-size:10px;color:var(--text-secondary);flex:none;}
+.ms-panel{position:absolute;top:calc(100% + 4px);left:0;background:#fff;border:1px solid #dfe3e8;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.15);padding:6px;min-width:220px;max-height:280px;overflow-y:auto;z-index:30;display:none;}
+.ms-panel.open{display:block;}
+.ms-actions{display:flex;justify-content:flex-end;padding:2px 6px 6px;border-bottom:1px solid #eee;margin-bottom:4px;}
+.ms-actions button{background:none;border:none;color:var(--accent);font-size:11.5px;font-weight:600;cursor:pointer;padding:2px 4px;}
+.ms-opt{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;font-size:12.5px;cursor:pointer;white-space:nowrap;}
+.ms-opt:hover{background:#f4f6f9;}
+.ms-opt input{cursor:pointer;}
+.ms-empty{padding:6px 8px;font-size:12px;color:var(--text-secondary);}
 .kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:var(--gap);margin-bottom:var(--gap);}
 .kpi-card{background:var(--bg-card);border-radius:var(--radius);padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.08);}
 .kpi-label{font-size:11.5px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
@@ -106,10 +116,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
   <div class="note" id="unlinked-note" style="display:none;"></div>
   <div class="entity-tabs" id="entity-tabs"></div>
   <div class="period-filters">
-    <label for="year-filter">Financial Year</label>
-    <select id="year-filter"><option value="All">All Years</option></select>
-    <label for="month-filter">Month</label>
-    <select id="month-filter" disabled><option value="All">All Months</option></select>
+    <label>Financial Year</label>
+    <div class="ms-wrap" id="year-ms"></div>
+    <label>Month</label>
+    <div class="ms-wrap" id="month-ms"></div>
+    <label>Property</label>
+    <div class="ms-wrap" id="property-ms"></div>
   </div>
   <div id="loading" class="loading">Fetching latest figures...</div>
 
@@ -247,9 +259,72 @@ sb.auth.onAuthStateChange((event, session)=>{
   else { showLogin(); }
 });
 
+/* ---------------- Multi-select dropdown ---------------- */
+class MultiSelect{
+  constructor(container, {allLabel, onChange}){
+    this.container = container;
+    this.allLabel = allLabel;
+    this.onChange = onChange;
+    this.selected = new Set();
+    this.options = [];
+    this.container.innerHTML = '<button type="button" class="ms-btn"><span></span></button><div class="ms-panel"></div>';
+    this.btn = this.container.querySelector('.ms-btn');
+    this.btnLabel = this.btn.querySelector('span');
+    this.panel = this.container.querySelector('.ms-panel');
+    this.btn.addEventListener('click', (e)=>{ e.stopPropagation(); this.panel.classList.toggle('open'); });
+    document.addEventListener('click', (e)=>{ if(!this.container.contains(e.target)) this.panel.classList.remove('open'); });
+    this.renderButton();
+  }
+  setOptions(options){
+    this.options = options;
+    const valid = new Set(options.map(o=>o.value));
+    Array.from(this.selected).forEach(v=>{ if(!valid.has(v)) this.selected.delete(v); });
+    this.renderPanel();
+    this.renderButton();
+  }
+  renderButton(){
+    const n = this.selected.size;
+    let text;
+    if(n===0) text = this.allLabel;
+    else {
+      const labels = this.options.filter(o=>this.selected.has(o.value)).map(o=>o.label);
+      text = labels.length<=2 ? labels.join(', ') : `${n} selected`;
+    }
+    this.btnLabel.textContent = text;
+  }
+  renderPanel(){
+    if(!this.options.length){
+      this.panel.innerHTML = '<div class="ms-empty">No options</div>';
+      return;
+    }
+    const actions = '<div class="ms-actions"><button type="button" data-act="clear">Clear</button></div>';
+    const opts = this.options.map(o=>`<label class="ms-opt"><input type="checkbox" value="${o.value}" ${this.selected.has(o.value)?'checked':''}> ${o.label}</label>`).join('');
+    this.panel.innerHTML = actions + opts;
+    this.panel.querySelector('[data-act="clear"]').addEventListener('click', ()=>{
+      this.selected.clear();
+      this.renderPanel(); this.renderButton();
+      this.onChange(this.selected);
+    });
+    this.panel.querySelectorAll('input[type=checkbox]').forEach(cb=>{
+      cb.addEventListener('change', ()=>{
+        if(cb.checked) this.selected.add(cb.value); else this.selected.delete(cb.value);
+        this.renderButton();
+        this.onChange(this.selected);
+      });
+    });
+  }
+}
+
 /* ---------------- Dashboard ---------------- */
 class Dashboard{
-  constructor(){ this.activeEntity='All'; this.selectedYear='All'; this.selectedMonth='All'; this.charts={}; }
+  constructor(){
+    this.activeEntity='All';
+    this.selectedYears=new Set(); this.selectedMonths=new Set(); this.selectedProperties=new Set();
+    this.charts={};
+    this.yearMs = new MultiSelect(document.getElementById('year-ms'), {allLabel:'All Years', onChange:(set)=>{ this.selectedYears=set; this.applyFilter(); }});
+    this.monthMs = new MultiSelect(document.getElementById('month-ms'), {allLabel:'All Months', onChange:(set)=>{ this.selectedMonths=set; this.applyFilter(); }});
+    this.propertyMs = new MultiSelect(document.getElementById('property-ms'), {allLabel:'All Properties', onChange:(set)=>{ this.selectedProperties=set; this.applyFilter(); }});
+  }
   async init(){
     try{
       const { data, error } = await sb.rpc('get_dashboard_data');
@@ -266,6 +341,7 @@ class Dashboard{
       this.renderUnlinkedNote();
       this.renderTabs();
       this.renderPeriodFilters();
+      this.refreshPropertyOptions();
       this.applyFilter();
       this.renderUnlinkedTable();
       this.renderNoLoanTable();
@@ -294,6 +370,7 @@ class Dashboard{
         this.activeEntity = el.getAttribute('data-e');
         c.querySelectorAll('.entity-tab').forEach(t=>t.classList.remove('active'));
         el.classList.add('active');
+        this.refreshPropertyOptions();
         this.applyFilter();
       });
     });
@@ -308,57 +385,46 @@ class Dashboard{
     });
     this.fyMap = fyMap;
     const fys = Object.keys(fyMap).sort((a,b)=>parseInt(a,10)-parseInt(b,10));
-    const yearSel = document.getElementById('year-filter');
-    const monthSel = document.getElementById('month-filter');
-    yearSel.innerHTML = '<option value="All">All Years</option>' + fys.map(fy=>`<option value="${fy}">FY ${fy}</option>`).join('');
-    this.populateMonthOptions('All');
-
-    yearSel.addEventListener('change', ()=>{
-      this.selectedYear = yearSel.value;
-      this.selectedMonth = 'All';
-      this.populateMonthOptions(this.selectedYear);
-      this.applyFilter();
-    });
-    monthSel.addEventListener('change', ()=>{
-      this.selectedMonth = monthSel.value;
-      this.applyFilter();
-    });
+    this.yearMs.setOptions(fys.map(fy=>({value:fy, label:`FY ${fy}`})));
+    const allYms = Array.from(new Set((this.data.monthly||[]).map(m=>m.ym).filter(Boolean))).sort();
+    this.monthMs.setOptions(allYms.map(ym=>({value:ym, label:formatYm(ym)})));
   }
-  populateMonthOptions(fy){
-    const monthSel = document.getElementById('month-filter');
-    if(fy==='All'){
-      monthSel.innerHTML = '<option value="All">All Months</option>';
-      monthSel.disabled = true;
-      monthSel.value = 'All';
-      return;
-    }
-    monthSel.disabled = false;
-    const yms = Array.from(this.fyMap[fy]||[]).sort();
-    monthSel.innerHTML = '<option value="All">All Months</option>' + yms.map(ym=>`<option value="${ym}">${formatYm(ym)}</option>`).join('');
-    monthSel.value = 'All';
+  refreshPropertyOptions(){
+    const props = Array.from(new Set((this.data.accounts||[])
+      .filter(a=>this.activeEntity==='All' || a.entity===this.activeEntity)
+      .map(a=>a.property))).sort();
+    this.propertyMs.setOptions(props.map(p=>({value:p, label:p})));
   }
+  isPeriodActive(){ return this.selectedYears.size>0 || this.selectedMonths.size>0; }
   periodLabel(){
-    if(this.selectedYear==='All') return null;
-    if(this.selectedMonth==='All') return `FY ${this.selectedYear}`;
-    return formatYm(this.selectedMonth);
-  }
-  periodEndYm(){
-    if(this.selectedMonth!=='All') return this.selectedMonth;
-    if(this.selectedYear==='All') return null;
-    const startYear = parseInt(this.selectedYear.split('-')[0],10);
-    return `${startYear+1}-06`;
+    const yrs = Array.from(this.selectedYears).sort();
+    const mos = Array.from(this.selectedMonths).sort();
+    const parts = [];
+    if(yrs.length) parts.push(yrs.length<=2 ? yrs.map(y=>`FY ${y}`).join(', ') : `${yrs.length} FYs`);
+    if(mos.length) parts.push(mos.length<=2 ? mos.map(formatYm).join(', ') : `${mos.length} months`);
+    return parts.join(' · ') || 'Selected Period';
   }
   periodWindow(allRows){
-    if(this.selectedYear==='All') return allRows;
+    if(!this.isPeriodActive()) return allRows;
     return allRows.filter(r=>{
-      if(fiscalYearLabel(r.ym)!==this.selectedYear) return false;
-      if(this.selectedMonth!=='All' && r.ym!==this.selectedMonth) return false;
+      if(this.selectedYears.size && !this.selectedYears.has(fiscalYearLabel(r.ym))) return false;
+      if(this.selectedMonths.size && !this.selectedMonths.has(r.ym)) return false;
       return true;
     });
   }
+  // Year-only window (ignores the Month picker) - used for the monthly trend charts, which
+  // should keep showing a trend line even when specific months are selected for the KPIs.
+  yearWindow(allRows){
+    if(!this.selectedYears.size) return allRows;
+    return allRows.filter(r=>this.selectedYears.has(fiscalYearLabel(r.ym)));
+  }
   applyFilter(){
     const all = this.data.accounts||[];
-    this.filtered = this.activeEntity==='All' ? all : all.filter(a=>a.entity===this.activeEntity);
+    this.filtered = all.filter(a=>{
+      if(this.activeEntity!=='All' && a.entity!==this.activeEntity) return false;
+      if(this.selectedProperties.size && !this.selectedProperties.has(a.property)) return false;
+      return true;
+    });
     this.renderKPIs();
     this.renderCharts();
     this.renderLinkedTable();
@@ -366,7 +432,7 @@ class Dashboard{
   computeTotals(){
     const d = this.filtered;
     const sumStatic = f => d.reduce((a,r)=>a+num(r[f]),0);
-    const periodActive = this.selectedYear !== 'All';
+    const periodActive = this.isPeriodActive();
     // Funding and Outstanding are point-in-time / lifetime figures - they don't change
     // when a year/month is selected, only the activity totals below do.
     const funding = sumStatic('funding');
@@ -384,13 +450,8 @@ class Dashboard{
       fee = windowRows.reduce((a,r)=>a+r.fee,0);
       repay = windowRows.reduce((a,r)=>a+r.repay,0);
       principal = Math.max(repay - interest - fee, 0);
-      // Cumulative-to-date through the end of the selected period, shown as a sub-figure.
-      let asOf = windowRows.length ? windowRows[windowRows.length-1] : null;
-      if(!asOf){
-        const endYm = this.periodEndYm();
-        const priorRows = endYm ? all.filter(r=>r.ym <= endYm) : [];
-        asOf = priorRows.length ? priorRows[priorRows.length-1] : null;
-      }
+      // Cumulative-to-date through the latest month in the selection, shown as a sub-figure.
+      const asOf = windowRows.length ? windowRows[windowRows.length-1] : null;
       cumInterest = asOf ? asOf.cum_interest : 0;
       cumFee = asOf ? asOf.cum_fee : 0;
       cumRepay = asOf ? asOf.cum_repay : 0;
@@ -399,15 +460,13 @@ class Dashboard{
     // Effective interest rate = period interest / average outstanding balance, annualized.
     // Outstanding balance at any month-end is approximated as cumulative funding drawn +
     // cumulative interest/fees accrued - cumulative repayments, tracking the same logic
-    // used for the "Current Outstanding" KPI, just evaluated at each point in time.
+    // used for the "Current Outstanding" KPI, just evaluated at each point in time. Averaged
+    // across every month in the window rather than just start/end, so non-contiguous
+    // multi-year/month selections (e.g. FY23-24 + FY25-26) still give a sane figure.
     let effectiveRate = null;
     if(windowRows.length){
-      const balanceAt = row => row ? (row.cum_funding + row.cum_interest + row.cum_fee - row.cum_repay) : 0;
-      const firstYm = windowRows[0].ym;
-      const priorRows = all.filter(r=>r.ym < firstYm);
-      const startBal = balanceAt(priorRows.length ? priorRows[priorRows.length-1] : null);
-      const endBal = balanceAt(windowRows[windowRows.length-1]);
-      const avgBal = (startBal + endBal) / 2;
+      const balanceAt = row => row.cum_funding + row.cum_interest + row.cum_fee - row.cum_repay;
+      const avgBal = windowRows.reduce((a,r)=>a+balanceAt(r),0) / windowRows.length;
       if(avgBal > 0) effectiveRate = (interest / avgBal) * (12 / windowRows.length) * 100;
     }
     return { interest, fee, repay, principal, funding, outstanding, cumInterest, cumFee, cumRepay, cumPrincipal, effectiveRate, count: d.length, periodActive };
@@ -447,7 +506,9 @@ class Dashboard{
         cum_repay:cr, cum_interest:ci, cum_fee:cf, cum_funding:cfund}; });
   }
   renderCharts(){
-    const m = this.periodWindow(this.aggMonthly());
+    // Repayment/Interest trend charts only respect the Year filter, not Month, so picking a
+    // single month doesn't collapse the trend line down to one bar.
+    const m = this.yearWindow(this.aggMonthly());
     const labels = m.map(r=>r.ym);
     Object.values(this.charts).forEach(c=>c && c.destroy());
 
