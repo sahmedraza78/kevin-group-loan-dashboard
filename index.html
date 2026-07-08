@@ -10,7 +10,7 @@
 :root{ color-scheme: light;
   --bg-primary:#f4f6f9; --bg-card:#ffffff; --bg-header:#0d2b52;
   --text-primary:#1c2733; --text-secondary:#6c7a89; --text-on-dark:#ffffff;
-  --gap:16px; --radius:10px; --accent:#1f5fa8;
+  --gap:16px; --radius:10px; --accent:#1f5fa8; --sky:#8bc3e8;
 }
 *{margin:0;padding:0;box-sizing:border-box;}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg-primary);color:var(--text-primary);}
@@ -62,7 +62,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 @media (max-width:900px){.chart-row{grid-template-columns:1fr;}}
 
 /* Login screen */
-#login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0d2b52,#1f5fa8);}
+#login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0d2b52,#8bc3e8);}
 .login-card{background:#fff;border-radius:14px;padding:40px 36px;width:100%;max-width:380px;box-shadow:0 10px 40px rgba(0,0,0,.25);}
 .login-card h1{font-size:19px;color:var(--text-primary);margin-bottom:4px;}
 .login-card .login-sub{font-size:12.5px;color:var(--text-secondary);margin-bottom:24px;}
@@ -174,7 +174,7 @@ const SUPABASE_URL = 'https://yrvyavcunqpjnxrsqbnh.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlydnlhdmN1bnFwam54cnNxYm5oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM0OTE5MDEsImV4cCI6MjA5OTA2NzkwMX0.gACraUSq_hlb8-9IdRidFUoJpSsA_ewpFJL4FoO_zPM';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const ENTITY_COLORS = {"Edge":"#8172b3","SDC":"#1f5fa8","SDA":"#c44e52","Personal":"#dd8452","TinTin SuSu (SMSF)":"#937860","Blue Sky":"#3aa6a6","Unknown":"#9aa5b1"};
+const ENTITY_COLORS = {"Edge":"#0d2b52","Blue Sky":"#16407a","SDA":"#1f5fa8","SDC":"#3d7ebd","Personal":"#5a9bd0","TinTin SuSu (SMSF)":"#8bc3e8","Unknown":"#9aa5b1"};
 const MONTH_NAMES = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function fiscalYearLabel(ym){
   const parts = ym.split('-'); const y = parseInt(parts[0],10), mo = parseInt(parts[1],10);
@@ -261,9 +261,10 @@ sb.auth.onAuthStateChange((event, session)=>{
 
 /* ---------------- Multi-select dropdown ---------------- */
 class MultiSelect{
-  constructor(container, {allLabel, onChange}){
+  constructor(container, {allLabel, emptyMessage, onChange}){
     this.container = container;
     this.allLabel = allLabel;
+    this.emptyMessage = emptyMessage || 'No options';
     this.onChange = onChange;
     this.selected = new Set();
     this.options = [];
@@ -285,7 +286,7 @@ class MultiSelect{
   renderButton(){
     const n = this.selected.size;
     let text;
-    if(n===0) text = this.allLabel;
+    if(n===0) text = this.options.length ? this.allLabel : this.emptyMessage;
     else {
       const labels = this.options.filter(o=>this.selected.has(o.value)).map(o=>o.label);
       text = labels.length<=2 ? labels.join(', ') : `${n} selected`;
@@ -294,7 +295,7 @@ class MultiSelect{
   }
   renderPanel(){
     if(!this.options.length){
-      this.panel.innerHTML = '<div class="ms-empty">No options</div>';
+      this.panel.innerHTML = `<div class="ms-empty">${this.emptyMessage}</div>`;
       return;
     }
     const actions = '<div class="ms-actions"><button type="button" data-act="clear">Clear</button></div>';
@@ -321,8 +322,8 @@ class Dashboard{
     this.activeEntity='All';
     this.selectedYears=new Set(); this.selectedMonths=new Set(); this.selectedProperties=new Set();
     this.charts={};
-    this.yearMs = new MultiSelect(document.getElementById('year-ms'), {allLabel:'All Years', onChange:(set)=>{ this.selectedYears=set; this.applyFilter(); }});
-    this.monthMs = new MultiSelect(document.getElementById('month-ms'), {allLabel:'All Months', onChange:(set)=>{ this.selectedMonths=set; this.applyFilter(); }});
+    this.yearMs = new MultiSelect(document.getElementById('year-ms'), {allLabel:'All Years', onChange:(set)=>{ this.selectedYears=set; this.refreshMonthOptions(); this.applyFilter(); }});
+    this.monthMs = new MultiSelect(document.getElementById('month-ms'), {allLabel:'All Months', emptyMessage:'Select a Financial Year first', onChange:(set)=>{ this.selectedMonths=set; this.applyFilter(); }});
     this.propertyMs = new MultiSelect(document.getElementById('property-ms'), {allLabel:'All Properties', onChange:(set)=>{ this.selectedProperties=set; this.applyFilter(); }});
   }
   async init(){
@@ -386,8 +387,20 @@ class Dashboard{
     this.fyMap = fyMap;
     const fys = Object.keys(fyMap).sort((a,b)=>parseInt(a,10)-parseInt(b,10));
     this.yearMs.setOptions(fys.map(fy=>({value:fy, label:`FY ${fy}`})));
-    const allYms = Array.from(new Set((this.data.monthly||[]).map(m=>m.ym).filter(Boolean))).sort();
-    this.monthMs.setOptions(allYms.map(ym=>({value:ym, label:formatYm(ym)})));
+    this.refreshMonthOptions();
+  }
+  // Month list is scoped to whichever Financial Year(s) are selected, so it only ever shows
+  // that year's Jul-Jun months - it stays empty until a year is picked, rather than dumping
+  // every month across the whole history into one flat list.
+  refreshMonthOptions(){
+    if(!this.selectedYears.size){
+      this.monthMs.setOptions([]);
+      return;
+    }
+    const yms = new Set();
+    this.selectedYears.forEach(fy=>{ (this.fyMap[fy]||new Set()).forEach(ym=>yms.add(ym)); });
+    const sorted = Array.from(yms).sort();
+    this.monthMs.setOptions(sorted.map(ym=>({value:ym, label:formatYm(ym)})));
   }
   refreshPropertyOptions(){
     const props = Array.from(new Set((this.data.accounts||[])
@@ -514,8 +527,8 @@ class Dashboard{
 
     this.charts.repay = new Chart(document.getElementById('chart-repay').getContext('2d'), {
       data:{labels, datasets:[
-        {type:'bar', label:'Monthly Repayment', data:m.map(r=>r.repay), backgroundColor:'#1f5fa8CC', order:2},
-        {type:'line', label:'Cumulative Payment', data:m.map(r=>r.cum_repay), borderColor:'#c44e52', backgroundColor:'#c44e5220', yAxisID:'y1', tension:.3, order:1}
+        {type:'bar', label:'Monthly Repayment', data:m.map(r=>r.repay), backgroundColor:'#0d2b52CC', order:2},
+        {type:'line', label:'Cumulative Payment', data:m.map(r=>r.cum_repay), borderColor:'#8bc3e8', backgroundColor:'#8bc3e820', yAxisID:'y1', tension:.3, order:1}
       ]},
       options:{responsive:true,maintainAspectRatio:false,
         scales:{y:{ticks:{callback:v=>fmt(v,'currency')}}, y1:{position:'right',grid:{display:false},ticks:{callback:v=>fmt(v,'currency')}}},
@@ -525,15 +538,15 @@ class Dashboard{
     const periodTotals = this.computeTotals();
     this.charts.breakdown = new Chart(document.getElementById('chart-breakdown').getContext('2d'), {
       type:'doughnut',
-      data:{labels:['Interest','Principal Paid','Service Fees'], datasets:[{data:[periodTotals.interest,periodTotals.principal,periodTotals.fee], backgroundColor:['#c44e52CC','#55a868CC','#dd8452CC'], borderColor:'#fff', borderWidth:2}]},
+      data:{labels:['Interest','Principal Paid','Service Fees'], datasets:[{data:[periodTotals.interest,periodTotals.principal,periodTotals.fee], backgroundColor:['#0d2b52CC','#1f5fa8CC','#8bc3e8CC'], borderColor:'#fff', borderWidth:2}]},
       options:{responsive:true,maintainAspectRatio:false,cutout:'60%',
         plugins:{legend:{position:'right'}, tooltip:{callbacks:{label:c=>{const t=c.dataset.data.reduce((a,b)=>a+b,0)||1; return `${c.label}: ${fmt(c.parsed,'currency')} (${(c.parsed/t*100).toFixed(1)}%)`;}}}}}
     });
 
     this.charts.interest = new Chart(document.getElementById('chart-interest').getContext('2d'), {
       data:{labels, datasets:[
-        {type:'bar', label:'Monthly Interest', data:m.map(r=>r.interest), backgroundColor:'#c44e52CC', order:2},
-        {type:'line', label:'Cumulative Interest', data:m.map(r=>r.cum_interest), borderColor:'#1f5fa8', backgroundColor:'#1f5fa820', yAxisID:'y1', tension:.3, order:1}
+        {type:'bar', label:'Monthly Interest', data:m.map(r=>r.interest), backgroundColor:'#0d2b52CC', order:2},
+        {type:'line', label:'Cumulative Interest', data:m.map(r=>r.cum_interest), borderColor:'#8bc3e8', backgroundColor:'#8bc3e820', yAxisID:'y1', tension:.3, order:1}
       ]},
       options:{responsive:true,maintainAspectRatio:false,
         scales:{y:{ticks:{callback:v=>fmt(v,'currency')}}, y1:{position:'right',grid:{display:false},ticks:{callback:v=>fmt(v,'currency')}}},
