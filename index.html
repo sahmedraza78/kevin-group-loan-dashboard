@@ -182,6 +182,7 @@ function fmt(v, type){
     if(av>=1e3) return sign+'$'+(av/1e3).toFixed(1)+'K';
     return sign+'$'+av.toFixed(0);
   }
+  if(type==='percent') return v.toFixed(2)+'%';
   return v.toLocaleString();
 }
 function num(v){ return v===null||v===undefined ? 0 : Number(v); }
@@ -370,6 +371,8 @@ class Dashboard{
     // when a year/month is selected, only the activity totals below do.
     const funding = sumStatic('funding');
     const outstanding = sumStatic('outstanding');
+    const all = this.aggMonthly();
+    const windowRows = periodActive ? this.periodWindow(all) : all;
     let interest, fee, repay, principal;
     let cumInterest, cumFee, cumRepay, cumPrincipal;
     if(!periodActive){
@@ -377,8 +380,6 @@ class Dashboard{
       cumInterest = interest; cumFee = fee; cumRepay = repay; cumPrincipal = principal;
     } else {
       // Activity isolated to just the selected period (not cumulative-to-date).
-      const all = this.aggMonthly();
-      const windowRows = this.periodWindow(all);
       interest = windowRows.reduce((a,r)=>a+r.interest,0);
       fee = windowRows.reduce((a,r)=>a+r.fee,0);
       repay = windowRows.reduce((a,r)=>a+r.repay,0);
@@ -395,7 +396,21 @@ class Dashboard{
       cumRepay = asOf ? asOf.cum_repay : 0;
       cumPrincipal = Math.max(cumRepay - cumInterest - cumFee, 0);
     }
-    return { interest, fee, repay, principal, funding, outstanding, cumInterest, cumFee, cumRepay, cumPrincipal, count: d.length, periodActive };
+    // Effective interest rate = period interest / average outstanding balance, annualized.
+    // Outstanding balance at any month-end is approximated as cumulative funding drawn +
+    // cumulative interest/fees accrued - cumulative repayments, tracking the same logic
+    // used for the "Current Outstanding" KPI, just evaluated at each point in time.
+    let effectiveRate = null;
+    if(windowRows.length){
+      const balanceAt = row => row ? (row.cum_funding + row.cum_interest + row.cum_fee - row.cum_repay) : 0;
+      const firstYm = windowRows[0].ym;
+      const priorRows = all.filter(r=>r.ym < firstYm);
+      const startBal = balanceAt(priorRows.length ? priorRows[priorRows.length-1] : null);
+      const endBal = balanceAt(windowRows[windowRows.length-1]);
+      const avgBal = (startBal + endBal) / 2;
+      if(avgBal > 0) effectiveRate = (interest / avgBal) * (12 / windowRows.length) * 100;
+    }
+    return { interest, fee, repay, principal, funding, outstanding, cumInterest, cumFee, cumRepay, cumPrincipal, effectiveRate, count: d.length, periodActive };
   }
   renderKPIs(){
     const t = this.computeTotals();
@@ -408,6 +423,7 @@ class Dashboard{
       {label: t.periodActive ? `Repayments (${label})` : 'Cumulative Repayments', value: fmt(t.repay,'currency'), sub: t.periodActive ? `Cumulative Repayments ${fmt(t.cumRepay,'currency')}` : null},
       {label: t.periodActive ? `Principal Paid (${label})` : 'Principal Paid', value: fmt(t.principal,'currency'), sub: t.periodActive ? `Total Principal Paid ${fmt(t.cumPrincipal,'currency')}` : null},
       {label:'Current Outstanding', value: fmt(t.outstanding,'currency')},
+      {label: t.periodActive ? `Effective Interest Rate (${label})` : 'Effective Interest Rate (Lifetime)', value: t.effectiveRate!=null ? fmt(t.effectiveRate,'percent') : 'N/A', sub:'Interest ÷ avg. balance, annualised'},
     ];
     document.getElementById('kpi-row').innerHTML = kpis.map(k=>`
       <div class="kpi-card"><div class="kpi-label">${k.label}</div><div class="kpi-value">${k.value}</div>${k.sub?`<div class="kpi-sub">${k.sub}</div>`:''}</div>`).join('');
