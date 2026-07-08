@@ -33,6 +33,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .kpi-card{background:var(--bg-card);border-radius:var(--radius);padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.08);}
 .kpi-label{font-size:11.5px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
 .kpi-value{font-size:22px;font-weight:700;}
+.kpi-sub{font-size:11px;color:var(--text-secondary);margin-top:3px;}
 .chart-row{display:grid;grid-template-columns:1.3fr 1fr;gap:var(--gap);margin-bottom:var(--gap);}
 .chart-container{background:var(--bg-card);border-radius:var(--radius);padding:18px 22px;box-shadow:0 1px 3px rgba(0,0,0,.08);}
 .chart-container h3{font-size:14px;font-weight:600;margin-bottom:14px;}
@@ -365,44 +366,51 @@ class Dashboard{
     const d = this.filtered;
     const sumStatic = f => d.reduce((a,r)=>a+num(r[f]),0);
     const periodActive = this.selectedYear !== 'All';
-    let interest, fee, repay, principal, funding, outstanding;
+    // Funding and Outstanding are point-in-time / lifetime figures - they don't change
+    // when a year/month is selected, only the activity totals below do.
+    const funding = sumStatic('funding');
+    const outstanding = sumStatic('outstanding');
+    let interest, fee, repay, principal;
+    let cumInterest, cumFee, cumRepay, cumPrincipal;
     if(!periodActive){
       interest = sumStatic('interest'); fee = sumStatic('fee'); repay = sumStatic('repay'); principal = sumStatic('principal_paid');
-      funding = sumStatic('funding'); outstanding = sumStatic('outstanding');
+      cumInterest = interest; cumFee = fee; cumRepay = repay; cumPrincipal = principal;
     } else {
-      // Cumulative-to-date through the end of the selected period (matches the DAX pattern:
-      // Date <= MAX(Date)), not activity isolated to just that period.
+      // Activity isolated to just the selected period (not cumulative-to-date).
       const all = this.aggMonthly();
       const windowRows = this.periodWindow(all);
+      interest = windowRows.reduce((a,r)=>a+r.interest,0);
+      fee = windowRows.reduce((a,r)=>a+r.fee,0);
+      repay = windowRows.reduce((a,r)=>a+r.repay,0);
+      principal = Math.max(repay - interest - fee, 0);
+      // Cumulative-to-date through the end of the selected period, shown as a sub-figure.
       let asOf = windowRows.length ? windowRows[windowRows.length-1] : null;
       if(!asOf){
         const endYm = this.periodEndYm();
         const priorRows = endYm ? all.filter(r=>r.ym <= endYm) : [];
         asOf = priorRows.length ? priorRows[priorRows.length-1] : null;
       }
-      interest = asOf ? asOf.cum_interest : 0;
-      fee = asOf ? asOf.cum_fee : 0;
-      repay = asOf ? asOf.cum_repay : 0;
-      funding = asOf ? asOf.cum_funding : 0;
-      principal = Math.max(repay - interest - fee, 0);
-      outstanding = (funding + interest + fee) - repay;
+      cumInterest = asOf ? asOf.cum_interest : 0;
+      cumFee = asOf ? asOf.cum_fee : 0;
+      cumRepay = asOf ? asOf.cum_repay : 0;
+      cumPrincipal = Math.max(cumRepay - cumInterest - cumFee, 0);
     }
-    return { interest, fee, repay, principal, funding, outstanding, count: d.length, periodActive };
+    return { interest, fee, repay, principal, funding, outstanding, cumInterest, cumFee, cumRepay, cumPrincipal, count: d.length, periodActive };
   }
   renderKPIs(){
     const t = this.computeTotals();
     const label = this.periodLabel();
     const kpis = [
       {label:'Properties (linked)', value: t.count},
-      {label: t.periodActive ? `Loan Funding (${label})` : 'Initial Loan Funding', value: fmt(t.funding,'currency')},
-      {label: t.periodActive ? `Interest (${label})` : 'Cumulative Interest', value: fmt(t.interest,'currency')},
-      {label: t.periodActive ? `Fees (${label})` : 'Cumulative Fees', value: fmt(t.fee,'currency')},
-      {label: t.periodActive ? `Repayments (${label})` : 'Cumulative Repayments', value: fmt(t.repay,'currency')},
-      {label: t.periodActive ? `Principal Paid (${label})` : 'Principal Paid', value: fmt(t.principal,'currency')},
-      {label: t.periodActive ? `Outstanding (${label})` : 'Current Outstanding', value: fmt(t.outstanding,'currency')},
+      {label:'Initial Loan Funding', value: fmt(t.funding,'currency')},
+      {label: t.periodActive ? `Interest (${label})` : 'Cumulative Interest', value: fmt(t.interest,'currency'), sub: t.periodActive ? `Cumulative Interest ${fmt(t.cumInterest,'currency')}` : null},
+      {label: t.periodActive ? `Fees (${label})` : 'Cumulative Fees', value: fmt(t.fee,'currency'), sub: t.periodActive ? `Cumulative Fees ${fmt(t.cumFee,'currency')}` : null},
+      {label: t.periodActive ? `Repayments (${label})` : 'Cumulative Repayments', value: fmt(t.repay,'currency'), sub: t.periodActive ? `Cumulative Repayments ${fmt(t.cumRepay,'currency')}` : null},
+      {label: t.periodActive ? `Principal Paid (${label})` : 'Principal Paid', value: fmt(t.principal,'currency'), sub: t.periodActive ? `Total Principal Paid ${fmt(t.cumPrincipal,'currency')}` : null},
+      {label:'Current Outstanding', value: fmt(t.outstanding,'currency')},
     ];
     document.getElementById('kpi-row').innerHTML = kpis.map(k=>`
-      <div class="kpi-card"><div class="kpi-label">${k.label}</div><div class="kpi-value">${k.value}</div></div>`).join('');
+      <div class="kpi-card"><div class="kpi-label">${k.label}</div><div class="kpi-value">${k.value}</div>${k.sub?`<div class="kpi-sub">${k.sub}</div>`:''}</div>`).join('');
   }
   aggMonthly(){
     // Always computed over the FULL history (unfiltered by the year/month picker) so the
