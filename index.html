@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kevin & Group - Loan Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js" integrity="sha384-iU8HYtnGQ8Cy4zl7gbNMOhsDTTKX02BTXptVP/vqAWIaTfM7isw76iyZCsjL2eVi" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+:root{ color-scheme: light;
+  --bg-primary:#f4f6f9; --bg-card:#ffffff; --bg-header:#0d2b52;
+  --text-primary:#1c2733; --text-secondary:#6c7a89; --text-on-dark:#ffffff;
+  --gap:16px; --radius:10px; --accent:#1f5fa8;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg-primary);color:var(--text-primary);}
+.dashboard-container{max-width:1420px;margin:0 auto;padding:var(--gap);}
+.dashboard-header{background:var(--bg-header);color:var(--text-on-dark);padding:20px 24px;border-radius:var(--radius);margin-bottom:var(--gap);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;}
+.dashboard-header h1{font-size:20px;font-weight:600;}
+.dashboard-header .sub{font-size:12px;color:rgba(255,255,255,.65);margin-top:2px;}
+.header-right{display:flex;align-items:center;gap:14px;}
+.user-email{font-size:12px;color:rgba(255,255,255,.85);}
+.btn-logout{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.3);padding:7px 14px;border-radius:6px;font-size:12px;cursor:pointer;}
+.btn-logout:hover{background:rgba(255,255,255,.22);}
+.entity-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:var(--gap);}
+.entity-tab{padding:9px 16px;border-radius:8px;background:var(--bg-card);color:var(--text-secondary);font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.08);}
+.entity-tab.active{background:var(--bg-header);color:#fff;}
+.period-filters{display:flex;gap:10px;align-items:center;margin-bottom:var(--gap);flex-wrap:wrap;}
+.period-filters label{font-size:11.5px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;font-weight:600;}
+.period-filters select{padding:8px 12px;border-radius:8px;border:1px solid #dfe3e8;background:var(--bg-card);font-size:13px;color:var(--text-primary);font-weight:600;cursor:pointer;}
+.period-filters select:disabled{opacity:.5;cursor:default;}
+.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:var(--gap);margin-bottom:var(--gap);}
+.kpi-card{background:var(--bg-card);border-radius:var(--radius);padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.08);}
+.kpi-label{font-size:11.5px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
+.kpi-value{font-size:22px;font-weight:700;}
+.chart-row{display:grid;grid-template-columns:1.3fr 1fr;gap:var(--gap);margin-bottom:var(--gap);}
+.chart-container{background:var(--bg-card);border-radius:var(--radius);padding:18px 22px;box-shadow:0 1px 3px rgba(0,0,0,.08);}
+.chart-container h3{font-size:14px;font-weight:600;margin-bottom:14px;}
+.chart-container canvas{max-height:300px;}
+.table-section{background:var(--bg-card);border-radius:var(--radius);padding:18px 22px;box-shadow:0 1px 3px rgba(0,0,0,.08);overflow-x:auto;margin-bottom:var(--gap);}
+.table-section h3{font-size:14px;font-weight:600;margin-bottom:14px;}
+.data-table{width:100%;border-collapse:collapse;font-size:12.5px;}
+.data-table thead th{text-align:left;padding:9px 10px;border-bottom:2px solid #e2e6ea;color:var(--text-secondary);font-weight:600;font-size:11px;text-transform:uppercase;white-space:nowrap;}
+.data-table tbody td{padding:9px 10px;border-bottom:1px solid #f0f0f0;white-space:nowrap;}
+.data-table tbody tr:hover{background:#f8f9fa;}
+.badge-missing{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:#fdecea;color:#c0392b;}
+.note{background:#fff8e6;border:1px solid #f0dca0;border-radius:8px;padding:12px 16px;font-size:12.5px;color:#7a5c00;margin-bottom:var(--gap);}
+.dashboard-footer{text-align:center;font-size:12px;color:var(--text-secondary);padding:10px 0 4px;}
+.loading{padding:40px;text-align:center;color:var(--text-secondary);}
+.err{background:#fdecea;border:1px solid #f5b7b1;color:#922b21;border-radius:8px;padding:12px 16px;margin-bottom:var(--gap);font-size:12px;white-space:pre-wrap;word-break:break-all;}
+@media (max-width:900px){.chart-row{grid-template-columns:1fr;}}
+
+/* Login screen */
+#login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0d2b52,#1f5fa8);}
+.login-card{background:#fff;border-radius:14px;padding:40px 36px;width:100%;max-width:380px;box-shadow:0 10px 40px rgba(0,0,0,.25);}
+.login-card h1{font-size:19px;color:var(--text-primary);margin-bottom:4px;}
+.login-card .login-sub{font-size:12.5px;color:var(--text-secondary);margin-bottom:24px;}
+.login-field{margin-bottom:16px;}
+.login-field label{display:block;font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;}
+.login-field input{width:100%;padding:11px 12px;border:1px solid #dfe3e8;border-radius:8px;font-size:14px;}
+.login-field input:focus{outline:none;border-color:var(--accent);}
+.btn-login{width:100%;background:var(--bg-header);color:#fff;border:none;padding:12px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;margin-top:6px;}
+.btn-login:hover{background:#123a6b;}
+.btn-login:disabled{opacity:.6;cursor:default;}
+.login-err{background:#fdecea;border:1px solid #f5b7b1;color:#922b21;border-radius:8px;padding:10px 12px;font-size:12.5px;margin-bottom:16px;display:none;}
+.login-hint{font-size:11.5px;color:var(--text-secondary);margin-top:18px;text-align:center;}
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-card">
+    <h1>Kevin &amp; Group</h1>
+    <div class="login-sub">Live Loan Dashboard - sign in to continue</div>
+    <div class="login-err" id="login-err"></div>
+    <form id="login-form">
+      <div class="login-field">
+        <label>Email</label>
+        <input type="email" id="login-email" autocomplete="username" required>
+      </div>
+      <div class="login-field">
+        <label>Password</label>
+        <input type="password" id="login-password" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn-login" id="login-btn">Sign in</button>
+    </form>
+    <div class="login-hint">First time signing in? Use the temporary password you were given, then reset it via "Forgot password" below.</div>
+    <div class="login-hint"><a href="#" id="reset-link" style="color:var(--accent);">Forgot password?</a></div>
+  </div>
+</div>
+
+<div class="dashboard-container" id="app-screen" style="display:none;">
+  <header class="dashboard-header">
+    <div>
+      <h1>Kevin &amp; Group - Live Loan Dashboard</h1>
+      <div class="sub" id="last-sync">Loading live data...</div>
+    </div>
+    <div class="header-right">
+      <span class="user-email" id="user-email"></span>
+      <button class="btn-logout" id="btn-logout">Sign out</button>
+    </div>
+  </header>
+
+  <div id="error-box"></div>
+  <div class="note" id="unlinked-note" style="display:none;"></div>
+  <div class="entity-tabs" id="entity-tabs"></div>
+  <div class="period-filters">
+    <label for="year-filter">Financial Year</label>
+    <select id="year-filter"><option value="All">All Years</option></select>
+    <label for="month-filter">Month</label>
+    <select id="month-filter" disabled><option value="All">All Months</option></select>
+  </div>
+  <div id="loading" class="loading">Fetching latest figures...</div>
+
+  <div id="content" style="display:none;">
+    <section class="kpi-row" id="kpi-row"></section>
+
+    <section class="chart-row">
+      <div class="chart-container">
+        <h3>Monthly Repayments (bar) &amp; Cumulative Payment (line)</h3>
+        <canvas id="chart-repay"></canvas>
+      </div>
+      <div class="chart-container">
+        <h3>Payment Breakdown - Interest vs Principal vs Fees</h3>
+        <canvas id="chart-breakdown"></canvas>
+      </div>
+    </section>
+
+    <section class="chart-row">
+      <div class="chart-container">
+        <h3>Interest Trend (monthly bar &amp; cumulative line)</h3>
+        <canvas id="chart-interest"></canvas>
+      </div>
+      <div class="chart-container">
+        <h3>Loan Outstanding by Property</h3>
+        <canvas id="chart-outstanding"></canvas>
+      </div>
+    </section>
+
+    <section class="table-section">
+      <h3>Linked Loan Accounts - Detail (live from Odoo via Supabase)</h3>
+      <div id="table-linked"></div>
+    </section>
+
+    <section class="table-section">
+      <h3>Properties Awaiting Odoo Access</h3>
+      <div id="table-unlinked"></div>
+    </section>
+
+    <section class="table-section">
+      <h3>Properties With No Loan Facility</h3>
+      <div id="table-no-loan"></div>
+    </section>
+  </div>
+
+  <footer class="dashboard-footer">Source: Supabase (project odoo) - synced from Odoo daily via scheduled Edge Function. Data refreshes automatically each time you sign in.</footer>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://yrvyavcunqpjnxrsqbnh.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlydnlhdmN1bnFwam54cnNxYm5oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM0OTE5MDEsImV4cCI6MjA5OTA2NzkwMX0.gACraUSq_hlb8-9IdRidFUoJpSsA_ewpFJL4FoO_zPM';
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const ENTITY_COLORS = {"Edge":"#8172b3","SDC":"#1f5fa8","SDA":"#c44e52","Personal":"#dd8452","TinTin SuSu (SMSF)":"#937860","Blue Sky":"#3aa6a6","Unknown":"#9aa5b1"};
+const MONTH_NAMES = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function fiscalYearLabel(ym){
+  const parts = ym.split('-'); const y = parseInt(parts[0],10), mo = parseInt(parts[1],10);
+  return mo>=7 ? `${y}-${String(y+1).slice(-2)}` : `${y-1}-${String(y).slice(-2)}`;
+}
+function formatYm(ym){
+  const parts = ym.split('-');
+  return MONTH_NAMES[parseInt(parts[1],10)] + ' ' + parts[0];
+}
+
+function fmt(v, type){
+  if(v===null||v===undefined||isNaN(v)) return '-';
+  v = Number(v);
+  if(type==='currency'){
+    const sign = v<0?'-':''; const av=Math.abs(v);
+    if(av>=1e6) return sign+'$'+(av/1e6).toFixed(2)+'M';
+    if(av>=1e3) return sign+'$'+(av/1e3).toFixed(1)+'K';
+    return sign+'$'+av.toFixed(0);
+  }
+  return v.toLocaleString();
+}
+function num(v){ return v===null||v===undefined ? 0 : Number(v); }
+
+/* ---------------- Auth ---------------- */
+const loginScreen = document.getElementById('login-screen');
+const appScreen = document.getElementById('app-screen');
+const loginForm = document.getElementById('login-form');
+const loginErr = document.getElementById('login-err');
+const loginBtn = document.getElementById('login-btn');
+
+function showLogin(msg){
+  loginScreen.style.display = 'flex';
+  appScreen.style.display = 'none';
+  if(msg){ loginErr.textContent = msg; loginErr.style.display='block'; }
+  else { loginErr.style.display='none'; }
+}
+function showApp(session){
+  loginScreen.style.display = 'none';
+  appScreen.style.display = 'block';
+  document.getElementById('user-email').textContent = session.user.email;
+  if(!window.__dashboardLoaded){
+    window.__dashboardLoaded = true;
+    const dashboard = new Dashboard();
+    dashboard.init();
+  }
+}
+
+loginForm.addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  loginErr.style.display = 'none';
+  loginBtn.disabled = true; loginBtn.textContent = 'Signing in...';
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  loginBtn.disabled = false; loginBtn.textContent = 'Sign in';
+  if(error){
+    loginErr.textContent = error.message || 'Sign in failed. Check your email and password.';
+    loginErr.style.display = 'block';
+    return;
+  }
+  showApp(data.session);
+});
+
+document.getElementById('reset-link').addEventListener('click', async (e)=>{
+  e.preventDefault();
+  const email = document.getElementById('login-email').value.trim();
+  if(!email){ loginErr.textContent = 'Enter your email above first, then click "Forgot password?"'; loginErr.style.display='block'; return; }
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: window.location.href });
+  if(error){ loginErr.textContent = error.message; loginErr.style.display='block'; }
+  else { loginErr.style.color = '#1e7a3d'; loginErr.textContent = 'Password reset email sent to ' + email + '. Check your inbox.'; loginErr.style.display='block'; }
+});
+
+document.getElementById('btn-logout').addEventListener('click', async ()=>{
+  await sb.auth.signOut();
+  window.__dashboardLoaded = false;
+  showLogin();
+});
+
+sb.auth.onAuthStateChange((event, session)=>{
+  if(session){ showApp(session); }
+  else { showLogin(); }
+});
+
+/* ---------------- Dashboard ---------------- */
+class Dashboard{
+  constructor(){ this.activeEntity='All'; this.selectedYear='All'; this.selectedMonth='All'; this.charts={}; }
+  async init(){
+    try{
+      const { data, error } = await sb.rpc('get_dashboard_data');
+      if(error) throw new Error(error.message || JSON.stringify(error));
+      this.data = data;
+      if (!this.data || !Array.isArray(this.data.accounts)) {
+        throw new Error('Response missing expected "accounts" array.');
+      }
+      document.getElementById('last-sync').textContent = this.data.last_sync
+        ? 'Last Odoo sync: ' + new Date(this.data.last_sync).toLocaleString()
+        : 'Live from Supabase';
+      document.getElementById('loading').style.display='none';
+      document.getElementById('content').style.display='block';
+      this.renderUnlinkedNote();
+      this.renderTabs();
+      this.renderPeriodFilters();
+      this.applyFilter();
+      this.renderUnlinkedTable();
+      this.renderNoLoanTable();
+    } catch(e){
+      document.getElementById('loading').style.display='none';
+      document.getElementById('error-box').innerHTML = '<div class="err">Could not load live data:\n'+String(e.message||e).slice(0,800)+'</div>';
+    }
+  }
+  renderUnlinkedNote(){
+    const n = (this.data.unlinked||[]).length;
+    const nNoLoan = (this.data.no_loan_account||[]).length;
+    const box = document.getElementById('unlinked-note');
+    let msg = '';
+    if(n) msg += `<strong>${n} properties are awaiting Odoo access</strong> - pending Vibhu granting access to those loan accounts. Excluded from charts/KPIs below.`;
+    if(nNoLoan) msg += (msg?'<br>':'') + `<strong>${nNoLoan} properties have no loan facility at all</strong> (land held outright, or paid from another account) - not an access issue, just nothing to link.`;
+    if(!msg) return;
+    box.style.display='block';
+    box.innerHTML = msg;
+  }
+  renderTabs(){
+    const entities = ['All', ...Array.from(new Set((this.data.accounts||[]).map(a=>a.entity))).sort()];
+    const c = document.getElementById('entity-tabs');
+    c.innerHTML = entities.map(e=>`<div class="entity-tab ${e===this.activeEntity?'active':''}" data-e="${e}">${e}</div>`).join('');
+    c.querySelectorAll('.entity-tab').forEach(el=>{
+      el.addEventListener('click', ()=>{
+        this.activeEntity = el.getAttribute('data-e');
+        c.querySelectorAll('.entity-tab').forEach(t=>t.classList.remove('active'));
+        el.classList.add('active');
+        this.applyFilter();
+      });
+    });
+  }
+  renderPeriodFilters(){
+    const fyMap = {};
+    (this.data.monthly||[]).forEach(m=>{
+      if(!m.ym) return;
+      const fy = fiscalYearLabel(m.ym);
+      if(!fyMap[fy]) fyMap[fy] = new Set();
+      fyMap[fy].add(m.ym);
+    });
+    this.fyMap = fyMap;
+    const fys = Object.keys(fyMap).sort((a,b)=>parseInt(a,10)-parseInt(b,10));
+    const yearSel = document.getElementById('year-filter');
+    const monthSel = document.getElementById('month-filter');
+    yearSel.innerHTML = '<option value="All">All Years</option>' + fys.map(fy=>`<option value="${fy}">FY ${fy}</option>`).join('');
+    this.populateMonthOptions('All');
+
+    yearSel.addEventListener('change', ()=>{
+      this.selectedYear = yearSel.value;
+      this.selectedMonth = 'All';
+      this.populateMonthOptions(this.selectedYear);
+      this.applyFilter();
+    });
+    monthSel.addEventListener('change', ()=>{
+      this.selectedMonth = monthSel.value;
+      this.applyFilter();
+    });
+  }
+  populateMonthOptions(fy){
+    const monthSel = document.getElementById('month-filter');
+    if(fy==='All'){
+      monthSel.innerHTML = '<option value="All">All Months</option>';
+      monthSel.disabled = true;
+      monthSel.value = 'All';
+      return;
+    }
+    monthSel.disabled = false;
+    const yms = Array.from(this.fyMap[fy]||[]).sort();
+    monthSel.innerHTML = '<option value="All">All Months</option>' + yms.map(ym=>`<option value="${ym}">${formatYm(ym)}</option>`).join('');
+    monthSel.value = 'All';
+  }
+  periodLabel(){
+    if(this.selectedYear==='All') return null;
+    if(this.selectedMonth==='All') return `FY ${this.selectedYear}`;
+    return formatYm(this.selectedMonth);
+  }
+  applyFilter(){
+    const all = this.data.accounts||[];
+    this.filtered = this.activeEntity==='All' ? all : all.filter(a=>a.entity===this.activeEntity);
+    this.renderKPIs();
+    this.renderCharts();
+    this.renderLinkedTable();
+  }
+  computeTotals(){
+    const d = this.filtered;
+    const sumStatic = f => d.reduce((a,r)=>a+num(r[f]),0);
+    const periodActive = this.selectedYear !== 'All';
+    let interest, fee, repay, principal;
+    if(!periodActive){
+      interest = sumStatic('interest'); fee = sumStatic('fee'); repay = sumStatic('repay'); principal = sumStatic('principal_paid');
+    } else {
+      const m = this.aggMonthly();
+      interest = m.reduce((a,r)=>a+r.interest,0);
+      fee = m.reduce((a,r)=>a+r.fee,0);
+      repay = m.reduce((a,r)=>a+r.repay,0);
+      principal = Math.max(repay - interest - fee, 0);
+    }
+    return { interest, fee, repay, principal, funding: sumStatic('funding'), outstanding: sumStatic('outstanding'), count: d.length, periodActive };
+  }
+  renderKPIs(){
+    const t = this.computeTotals();
+    const label = this.periodLabel();
+    const kpis = [
+      {label:'Properties (linked)', value: t.count},
+      {label:'Initial Loan Funding', value: fmt(t.funding,'currency')},
+      {label: t.periodActive ? `Interest (${label})` : 'Cumulative Interest', value: fmt(t.interest,'currency')},
+      {label: t.periodActive ? `Fees (${label})` : 'Cumulative Fees', value: fmt(t.fee,'currency')},
+      {label: t.periodActive ? `Repayments (${label})` : 'Cumulative Repayments', value: fmt(t.repay,'currency')},
+      {label: t.periodActive ? `Principal Paid (${label})` : 'Principal Paid', value: fmt(t.principal,'currency')},
+      {label:'Current Outstanding', value: fmt(t.outstanding,'currency')},
+    ];
+    document.getElementById('kpi-row').innerHTML = kpis.map(k=>`
+      <div class="kpi-card"><div class="kpi-label">${k.label}</div><div class="kpi-value">${k.value}</div></div>`).join('');
+  }
+  aggMonthly(){
+    const loanIds = new Set(this.filtered.map(a=>a.loan_id));
+    const map = {};
+    (this.data.monthly||[]).forEach(m=>{
+      if(!loanIds.has(m.loan_id)) return;
+      if(!m.ym) return;
+      if(this.selectedYear!=='All' && fiscalYearLabel(m.ym)!==this.selectedYear) return;
+      if(this.selectedMonth!=='All' && m.ym!==this.selectedMonth) return;
+      if(!map[m.ym]) map[m.ym]={interest:0,fee:0,repay:0};
+      map[m.ym].interest += num(m.interest); map[m.ym].fee += num(m.fee); map[m.ym].repay += num(m.repay);
+    });
+    const yms = Object.keys(map).sort();
+    let cr=0,ci=0;
+    return yms.map(ym=>{ cr+=map[ym].repay; ci+=map[ym].interest;
+      return {ym, interest:map[ym].interest, fee:map[ym].fee, repay:map[ym].repay, cum_repay:cr, cum_interest:ci}; });
+  }
+  renderCharts(){
+    const m = this.aggMonthly();
+    const labels = m.map(r=>r.ym);
+    Object.values(this.charts).forEach(c=>c && c.destroy());
+
+    this.charts.repay = new Chart(document.getElementById('chart-repay').getContext('2d'), {
+      data:{labels, datasets:[
+        {type:'bar', label:'Monthly Repayment', data:m.map(r=>r.repay), backgroundColor:'#1f5fa8CC', order:2},
+        {type:'line', label:'Cumulative Payment', data:m.map(r=>r.cum_repay), borderColor:'#c44e52', backgroundColor:'#c44e5220', yAxisID:'y1', tension:.3, order:1}
+      ]},
+      options:{responsive:true,maintainAspectRatio:false,
+        scales:{y:{ticks:{callback:v=>fmt(v,'currency')}}, y1:{position:'right',grid:{display:false},ticks:{callback:v=>fmt(v,'currency')}}},
+        plugins:{tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${fmt(c.parsed.y,'currency')}`}}}}
+    });
+
+    const periodTotals = this.computeTotals();
+    this.charts.breakdown = new Chart(document.getElementById('chart-breakdown').getContext('2d'), {
+      type:'doughnut',
+      data:{labe
