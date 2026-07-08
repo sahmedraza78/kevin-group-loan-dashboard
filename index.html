@@ -340,6 +340,20 @@ class Dashboard{
     if(this.selectedMonth==='All') return `FY ${this.selectedYear}`;
     return formatYm(this.selectedMonth);
   }
+  periodEndYm(){
+    if(this.selectedMonth!=='All') return this.selectedMonth;
+    if(this.selectedYear==='All') return null;
+    const startYear = parseInt(this.selectedYear.split('-')[0],10);
+    return `${startYear+1}-06`;
+  }
+  periodWindow(allRows){
+    if(this.selectedYear==='All') return allRows;
+    return allRows.filter(r=>{
+      if(fiscalYearLabel(r.ym)!==this.selectedYear) return false;
+      if(this.selectedMonth!=='All' && r.ym!==this.selectedMonth) return false;
+      return true;
+    });
+  }
   applyFilter(){
     const all = this.data.accounts||[];
     this.filtered = this.activeEntity==='All' ? all : all.filter(a=>a.entity===this.activeEntity);
@@ -351,51 +365,65 @@ class Dashboard{
     const d = this.filtered;
     const sumStatic = f => d.reduce((a,r)=>a+num(r[f]),0);
     const periodActive = this.selectedYear !== 'All';
-    let interest, fee, repay, principal;
+    let interest, fee, repay, principal, funding, outstanding;
     if(!periodActive){
       interest = sumStatic('interest'); fee = sumStatic('fee'); repay = sumStatic('repay'); principal = sumStatic('principal_paid');
+      funding = sumStatic('funding'); outstanding = sumStatic('outstanding');
     } else {
-      const m = this.aggMonthly();
-      interest = m.reduce((a,r)=>a+r.interest,0);
-      fee = m.reduce((a,r)=>a+r.fee,0);
-      repay = m.reduce((a,r)=>a+r.repay,0);
+      // Cumulative-to-date through the end of the selected period (matches the DAX pattern:
+      // Date <= MAX(Date)), not activity isolated to just that period.
+      const all = this.aggMonthly();
+      const windowRows = this.periodWindow(all);
+      let asOf = windowRows.length ? windowRows[windowRows.length-1] : null;
+      if(!asOf){
+        const endYm = this.periodEndYm();
+        const priorRows = endYm ? all.filter(r=>r.ym <= endYm) : [];
+        asOf = priorRows.length ? priorRows[priorRows.length-1] : null;
+      }
+      interest = asOf ? asOf.cum_interest : 0;
+      fee = asOf ? asOf.cum_fee : 0;
+      repay = asOf ? asOf.cum_repay : 0;
+      funding = asOf ? asOf.cum_funding : 0;
       principal = Math.max(repay - interest - fee, 0);
+      outstanding = (funding + interest + fee) - repay;
     }
-    return { interest, fee, repay, principal, funding: sumStatic('funding'), outstanding: sumStatic('outstanding'), count: d.length, periodActive };
+    return { interest, fee, repay, principal, funding, outstanding, count: d.length, periodActive };
   }
   renderKPIs(){
     const t = this.computeTotals();
     const label = this.periodLabel();
     const kpis = [
       {label:'Properties (linked)', value: t.count},
-      {label:'Initial Loan Funding', value: fmt(t.funding,'currency')},
+      {label: t.periodActive ? `Loan Funding (${label})` : 'Initial Loan Funding', value: fmt(t.funding,'currency')},
       {label: t.periodActive ? `Interest (${label})` : 'Cumulative Interest', value: fmt(t.interest,'currency')},
       {label: t.periodActive ? `Fees (${label})` : 'Cumulative Fees', value: fmt(t.fee,'currency')},
       {label: t.periodActive ? `Repayments (${label})` : 'Cumulative Repayments', value: fmt(t.repay,'currency')},
       {label: t.periodActive ? `Principal Paid (${label})` : 'Principal Paid', value: fmt(t.principal,'currency')},
-      {label:'Current Outstanding', value: fmt(t.outstanding,'currency')},
+      {label: t.periodActive ? `Outstanding (${label})` : 'Current Outstanding', value: fmt(t.outstanding,'currency')},
     ];
     document.getElementById('kpi-row').innerHTML = kpis.map(k=>`
       <div class="kpi-card"><div class="kpi-label">${k.label}</div><div class="kpi-value">${k.value}</div></div>`).join('');
   }
   aggMonthly(){
+    // Always computed over the FULL history (unfiltered by the year/month picker) so the
+    // cumulative running totals are true-to-date, not reset at the selected period's start.
+    // periodWindow() is used separately to decide which months are actually displayed.
     const loanIds = new Set(this.filtered.map(a=>a.loan_id));
     const map = {};
     (this.data.monthly||[]).forEach(m=>{
       if(!loanIds.has(m.loan_id)) return;
       if(!m.ym) return;
-      if(this.selectedYear!=='All' && fiscalYearLabel(m.ym)!==this.selectedYear) return;
-      if(this.selectedMonth!=='All' && m.ym!==this.selectedMonth) return;
-      if(!map[m.ym]) map[m.ym]={interest:0,fee:0,repay:0};
-      map[m.ym].interest += num(m.interest); map[m.ym].fee += num(m.fee); map[m.ym].repay += num(m.repay);
+      if(!map[m.ym]) map[m.ym]={interest:0,fee:0,repay:0,funding:0};
+      map[m.ym].interest += num(m.interest); map[m.ym].fee += num(m.fee); map[m.ym].repay += num(m.repay); map[m.ym].funding += num(m.funding);
     });
     const yms = Object.keys(map).sort();
-    let cr=0,ci=0;
-    return yms.map(ym=>{ cr+=map[ym].repay; ci+=map[ym].interest;
-      return {ym, interest:map[ym].interest, fee:map[ym].fee, repay:map[ym].repay, cum_repay:cr, cum_interest:ci}; });
+    let cr=0,ci=0,cf=0,cfund=0;
+    return yms.map(ym=>{ cr+=map[ym].repay; ci+=map[ym].interest; cf+=map[ym].fee; cfund+=map[ym].funding;
+      return {ym, interest:map[ym].interest, fee:map[ym].fee, repay:map[ym].repay, funding:map[ym].funding,
+        cum_repay:cr, cum_interest:ci, cum_fee:cf, cum_funding:cfund}; });
   }
   renderCharts(){
-    const m = this.aggMonthly();
+    const m = this.periodWindow(this.aggMonthly());
     const labels = m.map(r=>r.ym);
     Object.values(this.charts).forEach(c=>c && c.destroy());
 
@@ -412,4 +440,67 @@ class Dashboard{
     const periodTotals = this.computeTotals();
     this.charts.breakdown = new Chart(document.getElementById('chart-breakdown').getContext('2d'), {
       type:'doughnut',
-      data:{labe
+      data:{labels:['Interest','Principal Paid','Service Fees'], datasets:[{data:[periodTotals.interest,periodTotals.principal,periodTotals.fee], backgroundColor:['#c44e52CC','#55a868CC','#dd8452CC'], borderColor:'#fff', borderWidth:2}]},
+      options:{responsive:true,maintainAspectRatio:false,cutout:'60%',
+        plugins:{legend:{position:'right'}, tooltip:{callbacks:{label:c=>{const t=c.dataset.data.reduce((a,b)=>a+b,0)||1; return `${c.label}: ${fmt(c.parsed,'currency')} (${(c.parsed/t*100).toFixed(1)}%)`;}}}}}
+    });
+
+    this.charts.interest = new Chart(document.getElementById('chart-interest').getContext('2d'), {
+      data:{labels, datasets:[
+        {type:'bar', label:'Monthly Interest', data:m.map(r=>r.interest), backgroundColor:'#c44e52CC', order:2},
+        {type:'line', label:'Cumulative Interest', data:m.map(r=>r.cum_interest), borderColor:'#1f5fa8', backgroundColor:'#1f5fa820', yAxisID:'y1', tension:.3, order:1}
+      ]},
+      options:{responsive:true,maintainAspectRatio:false,
+        scales:{y:{ticks:{callback:v=>fmt(v,'currency')}}, y1:{position:'right',grid:{display:false},ticks:{callback:v=>fmt(v,'currency')}}},
+        plugins:{tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${fmt(c.parsed.y,'currency')}`}}}}
+    });
+
+    const props = this.filtered.map(a=>a.property.length>20?a.property.slice(0,18)+'...':a.property);
+    this.charts.outstanding = new Chart(document.getElementById('chart-outstanding').getContext('2d'), {
+      type:'bar',
+      data:{labels:props, datasets:[{label:'Outstanding', data:this.filtered.map(a=>num(a.outstanding)), backgroundColor: this.filtered.map(a=>ENTITY_COLORS[a.entity]||'#ccc'), borderRadius:4}]},
+      options:{responsive:true,maintainAspectRatio:false, indexAxis:'y',
+        plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>fmt(c.parsed.x,'currency')}}},
+        scales:{x:{ticks:{callback:v=>fmt(v,'currency')}}}}
+    });
+  }
+  renderLinkedTable(){
+    const cols = [
+      {f:'property',l:'Property'},{f:'entity',l:'Entity'},{f:'funding',l:'Initial Funding',fmt:'currency'},
+      {f:'interest',l:'Cum. Interest',fmt:'currency'},{f:'fee',l:'Cum. Fees',fmt:'currency'},
+      {f:'repay',l:'Cum. Repayments',fmt:'currency'},{f:'outstanding',l:'Outstanding',fmt:'currency'},
+    ];
+    let html = '<table class="data-table"><thead><tr>'+cols.map(c=>`<th>${c.l}</th>`).join('')+'</tr></thead><tbody>';
+    this.filtered.forEach(r=>{
+      html += '<tr>'+cols.map(c=>`<td>${c.fmt?fmt(r[c.f],c.fmt):r[c.f]}</td>`).join('')+'</tr>';
+    });
+    html += '</tbody></table>';
+    document.getElementById('table-linked').innerHTML = html;
+  }
+  renderUnlinkedTable(){
+    const cols = [{f:'property',l:'Property'},{f:'entity',l:'Entity'},{f:'lender',l:'Lender'},{f:'loan_account',l:'Loan A/C #'}];
+    let html = '<table class="data-table"><thead><tr>'+cols.map(c=>`<th>${c.l}</th>`).join('')+'<th>Status</th></tr></thead><tbody>';
+    (this.data.unlinked||[]).forEach(r=>{
+      html += '<tr>'+cols.map(c=>`<td>${r[c.f]||'-'}</td>`).join('')+'<td><span class="badge-missing">Access pending</span></td></tr>';
+    });
+    html += '</tbody></table>';
+    document.getElementById('table-unlinked').innerHTML = html;
+  }
+  renderNoLoanTable(){
+    const cols = [{f:'property',l:'Property'},{f:'entity',l:'Entity'},{f:'note',l:'Note'}];
+    let html = '<table class="data-table"><thead><tr>'+cols.map(c=>`<th>${c.l}</th>`).join('')+'</tr></thead><tbody>';
+    (this.data.no_loan_account||[]).forEach(r=>{
+      html += '<tr>'+cols.map(c=>`<td>${r[c.f]||'-'}</td>`).join('')+'</tr>';
+    });
+    html += '</tbody></table>';
+    document.getElementById('table-no-loan').innerHTML = html;
+  }
+}
+
+/* Kick off: check for an existing session on load */
+sb.auth.getSession().then(({data})=>{
+  if(data.session){ showApp(data.session); } else { showLogin(); }
+});
+</script>
+</body>
+</html>
