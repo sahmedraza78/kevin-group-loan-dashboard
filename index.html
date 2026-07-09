@@ -157,6 +157,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 
     <section class="table-section">
       <h3>Properties Awaiting Odoo Access</h3>
+      <div class="note">Interest Rate, Balance and Established date shown here (where available) are manually entered, not synced from Odoo - treat as a point-in-time estimate, not a live figure.</div>
       <div id="table-unlinked"></div>
     </section>
 
@@ -576,10 +577,18 @@ class Dashboard{
     document.getElementById('table-linked').innerHTML = html;
   }
   renderUnlinkedTable(){
-    const cols = [{f:'property',l:'Property'},{f:'entity',l:'Entity'},{f:'lender',l:'Lender'},{f:'loan_account',l:'Loan A/C #'}];
+    const cols = [
+      {l:'Property', render:r=>r.property||'-'},
+      {l:'Entity', render:r=>r.entity||'-'},
+      {l:'Lender', render:r=>r.lender||'-'},
+      {l:'Loan A/C #', render:r=>r.loan_account ? r.loan_account.replace(/\.0$/,'') : '-'},
+      {l:'Interest Rate', render:r=>r.interest_rate!=null ? fmt(r.interest_rate*100,'percent') : '-'},
+      {l:'Balance (Manual)', render:r=>r.manual_outstanding!=null ? fmt(r.manual_outstanding,'currency') : '-'},
+      {l:'Established', render:r=>r.established_on ? new Date(r.established_on).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'}) : '-'},
+    ];
     let html = '<table class="data-table"><thead><tr>'+cols.map(c=>`<th>${c.l}</th>`).join('')+'<th>Status</th></tr></thead><tbody>';
     (this.data.unlinked||[]).forEach(r=>{
-      html += '<tr>'+cols.map(c=>`<td>${r[c.f]||'-'}</td>`).join('')+'<td><span class="badge-missing">Access pending</span></td></tr>';
+      html += '<tr>'+cols.map(c=>`<td>${c.render(r)}</td>`).join('')+'<td><span class="badge-missing">Access pending</span></td></tr>';
     });
     html += '</tbody></table>';
     document.getElementById('table-unlinked').innerHTML = html;
