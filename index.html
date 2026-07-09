@@ -55,6 +55,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .data-table tbody td{padding:9px 10px;border-bottom:1px solid #f0f0f0;white-space:nowrap;}
 .data-table tbody tr:hover{background:#f8f9fa;}
 .badge-missing{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:#fdecea;color:#c0392b;}
+.badge-linked{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:#e6f4ea;color:#1e7a3d;}
+.badge-noloan{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;background:#eef0f2;color:var(--text-secondary);}
+.row-pending td{background:#fffaf0;}
+.row-no-loan td{background:#fafbfc;color:var(--text-secondary);}
+.data-table tbody tr.row-total td{font-weight:700;border-top:2px solid #e2e6ea;border-bottom:none;background:#fff;}
 .note{background:#fff8e6;border:1px solid #f0dca0;border-radius:8px;padding:12px 16px;font-size:12.5px;color:#7a5c00;margin-bottom:var(--gap);}
 .dashboard-footer{text-align:center;font-size:12px;color:var(--text-secondary);padding:10px 0 4px;}
 .loading{padding:40px;text-align:center;color:var(--text-secondary);}
@@ -151,19 +156,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
     </section>
 
     <section class="table-section">
-      <h3>Linked Loan Accounts - Detail (live from Odoo via Supabase)</h3>
-      <div id="table-linked"></div>
-    </section>
-
-    <section class="table-section">
-      <h3>Properties Awaiting Odoo Access</h3>
-      <div class="note">Interest Rate, Balance and Established date shown here (where available) are manually entered, not synced from Odoo - treat as a point-in-time estimate, not a live figure.</div>
-      <div id="table-unlinked"></div>
-    </section>
-
-    <section class="table-section">
-      <h3>Properties With No Loan Facility</h3>
-      <div id="table-no-loan"></div>
+      <h3>All Properties &amp; Loans</h3>
+      <div class="note">Rows marked <strong>Pending Odoo Access</strong> use manually entered figures (Interest Rate, Balance, Established date where available), not synced from Odoo - treat as a point-in-time estimate, not a live figure. Rows marked <strong>No Loan Facility</strong> have no loan account at all.</div>
+      <div id="table-all"></div>
     </section>
   </div>
 
@@ -345,8 +340,6 @@ class Dashboard{
       this.renderPeriodFilters();
       this.refreshPropertyOptions();
       this.applyFilter();
-      this.renderUnlinkedTable();
-      this.renderNoLoanTable();
     } catch(e){
       document.getElementById('loading').style.display='none';
       document.getElementById('error-box').innerHTML = '<div class="err">Could not load live data:\n'+String(e.message||e).slice(0,800)+'</div>';
@@ -364,7 +357,7 @@ class Dashboard{
     box.innerHTML = msg;
   }
   renderTabs(){
-    const entities = ['All', ...Array.from(new Set((this.data.accounts||[]).map(a=>a.entity))).sort()];
+    const entities = ['All', ...Array.from(new Set(this.allPropertyRows().map(a=>a.entity))).sort()];
     const c = document.getElementById('entity-tabs');
     c.innerHTML = entities.map(e=>`<div class="entity-tab ${e===this.activeEntity?'active':''}" data-e="${e}">${e}</div>`).join('');
     c.querySelectorAll('.entity-tab').forEach(el=>{
@@ -404,7 +397,7 @@ class Dashboard{
     this.monthMs.setOptions(sorted.map(ym=>({value:ym, label:formatYm(ym)})));
   }
   refreshPropertyOptions(){
-    const props = Array.from(new Set((this.data.accounts||[])
+    const props = Array.from(new Set(this.allPropertyRows()
       .filter(a=>this.activeEntity==='All' || a.entity===this.activeEntity)
       .map(a=>a.property))).sort();
     this.propertyMs.setOptions(props.map(p=>({value:p, label:p})));
@@ -433,15 +426,14 @@ class Dashboard{
     return allRows.filter(r=>this.selectedYears.has(fiscalYearLabel(r.ym)));
   }
   applyFilter(){
-    const all = this.data.accounts||[];
-    this.filtered = all.filter(a=>{
-      if(this.activeEntity!=='All' && a.entity!==this.activeEntity) return false;
-      if(this.selectedProperties.size && !this.selectedProperties.has(a.property)) return false;
-      return true;
-    });
+    const matches = a =>
+      (this.activeEntity==='All' || a.entity===this.activeEntity) &&
+      (!this.selectedProperties.size || this.selectedProperties.has(a.property));
+    this.filtered = (this.data.accounts||[]).filter(matches);
+    this.filteredAll = this.allPropertyRows().filter(matches);
     this.renderKPIs();
     this.renderCharts();
-    this.renderLinkedTable();
+    this.renderAllTable();
   }
   computeTotals(){
     const d = this.filtered;
@@ -563,44 +555,60 @@ class Dashboard{
         scales:{x:{ticks:{callback:v=>fmt(v,'currency')}}}}
     });
   }
-  renderLinkedTable(){
-    const cols = [
-      {f:'property',l:'Property'},{f:'entity',l:'Entity'},{f:'paid_from',l:'Paid From'},{f:'funding',l:'Initial Funding',fmt:'currency'},
-      {f:'interest',l:'Cum. Interest',fmt:'currency'},{f:'fee',l:'Cum. Fees',fmt:'currency'},
-      {f:'repay',l:'Cum. Repayments',fmt:'currency'},{f:'outstanding',l:'Outstanding',fmt:'currency'},
-    ];
-    let html = '<table class="data-table"><thead><tr>'+cols.map(c=>`<th>${c.l}</th>`).join('')+'</tr></thead><tbody>';
-    this.filtered.forEach(r=>{
-      html += '<tr>'+cols.map(c=>`<td>${c.fmt?fmt(r[c.f],c.fmt):r[c.f]}</td>`).join('')+'</tr>';
-    });
-    html += '</tbody></table>';
-    document.getElementById('table-linked').innerHTML = html;
+  // Merges accounts (linked/Odoo-synced), unlinked (pending Odoo access) and no_loan_account
+  // into one unified row shape so the whole portfolio can render as a single table.
+  allPropertyRows(){
+    const linked = (this.data.accounts||[]).map(a=>({
+      status:'linked', property:a.property, entity:a.entity, paid_from:a.paid_from,
+      loan_account:null, interest_rate:null,
+      funding:a.funding, interest:a.interest, fee:a.fee, repay:a.repay, outstanding:a.outstanding,
+      established_on:null, note:null,
+    }));
+    const pending = (this.data.unlinked||[]).map(u=>({
+      status:'pending', property:u.property, entity:u.entity, paid_from:u.paid_from,
+      loan_account:u.loan_account, interest_rate:u.interest_rate,
+      funding:null, interest:null, fee:null, repay:null, outstanding:u.manual_outstanding,
+      established_on:u.established_on, note:null,
+    }));
+    const noLoan = (this.data.no_loan_account||[]).map(n=>({
+      status:'no_loan', property:n.property, entity:n.entity, paid_from:null,
+      loan_account:null, interest_rate:null,
+      funding:null, interest:null, fee:null, repay:null, outstanding:null,
+      established_on:null, note:n.note,
+    }));
+    return [...linked, ...pending, ...noLoan];
   }
-  renderUnlinkedTable(){
+  STATUS_BADGE = {
+    linked: '<span class="badge-linked">Linked</span>',
+    pending: '<span class="badge-missing">Pending Odoo Access</span>',
+    no_loan: '<span class="badge-noloan">No Loan Facility</span>',
+  };
+  renderAllTable(){
     const cols = [
       {l:'Property', render:r=>r.property||'-'},
       {l:'Entity', render:r=>r.entity||'-'},
       {l:'Paid From', render:r=>r.paid_from||'-'},
       {l:'Loan A/C #', render:r=>r.loan_account ? r.loan_account.replace(/\.0$/,'') : '-'},
       {l:'Interest Rate', render:r=>r.interest_rate!=null ? fmt(r.interest_rate*100,'percent') : '-'},
-      {l:'Balance (Manual)', render:r=>r.manual_outstanding!=null ? fmt(r.manual_outstanding,'currency') : '-'},
+      {l:'Initial Funding', render:r=>r.funding!=null ? fmt(r.funding,'currency') : '-'},
+      {l:'Cum. Interest', render:r=>r.interest!=null ? fmt(r.interest,'currency') : '-'},
+      {l:'Cum. Fees', render:r=>r.fee!=null ? fmt(r.fee,'currency') : '-'},
+      {l:'Cum. Repayments', render:r=>r.repay!=null ? fmt(r.repay,'currency') : '-'},
+      {l:'Outstanding', render:r=>r.outstanding!=null ? fmt(r.outstanding,'currency') : '-'},
       {l:'Established', render:r=>r.established_on ? new Date(r.established_on).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'}) : '-'},
     ];
+    const rowClass = {linked:'', pending:'row-pending', no_loan:'row-no-loan'};
     let html = '<table class="data-table"><thead><tr>'+cols.map(c=>`<th>${c.l}</th>`).join('')+'<th>Status</th></tr></thead><tbody>';
-    (this.data.unlinked||[]).forEach(r=>{
-      html += '<tr>'+cols.map(c=>`<td>${c.render(r)}</td>`).join('')+'<td><span class="badge-missing">Access pending</span></td></tr>';
+    this.filteredAll.slice().sort((a,b)=>(a.property||'').localeCompare(b.property||'')).forEach(r=>{
+      html += `<tr class="${rowClass[r.status]}">`+cols.map(c=>`<td>${c.render(r)}</td>`).join('')+`<td>${this.STATUS_BADGE[r.status]}</td></tr>`;
     });
+    const sum = f => this.filteredAll.reduce((a,r)=>a + (r[f]!=null ? Number(r[f]) : 0), 0);
+    html += `<tr class="row-total"><td colspan="5">Total (${this.filteredAll.length} properties)</td>
+      <td>${fmt(sum('funding'),'currency')}</td><td>${fmt(sum('interest'),'currency')}</td>
+      <td>${fmt(sum('fee'),'currency')}</td><td>${fmt(sum('repay'),'currency')}</td>
+      <td>${fmt(sum('outstanding'),'currency')}</td><td></td><td></td></tr>`;
     html += '</tbody></table>';
-    document.getElementById('table-unlinked').innerHTML = html;
-  }
-  renderNoLoanTable(){
-    const cols = [{f:'property',l:'Property'},{f:'entity',l:'Entity'},{f:'note',l:'Note'}];
-    let html = '<table class="data-table"><thead><tr>'+cols.map(c=>`<th>${c.l}</th>`).join('')+'</tr></thead><tbody>';
-    (this.data.no_loan_account||[]).forEach(r=>{
-      html += '<tr>'+cols.map(c=>`<td>${r[c.f]||'-'}</td>`).join('')+'</tr>';
-    });
-    html += '</tbody></table>';
-    document.getElementById('table-no-loan').innerHTML = html;
+    document.getElementById('table-all').innerHTML = html;
   }
 }
 
