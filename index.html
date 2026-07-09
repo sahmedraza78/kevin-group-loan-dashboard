@@ -565,7 +565,7 @@ class Dashboard{
   }
   renderLinkedTable(){
     const cols = [
-      {f:'property',l:'Property'},{f:'entity',l:'Entity'},{f:'funding',l:'Initial Funding',fmt:'currency'},
+      {f:'property',l:'Property'},{f:'entity',l:'Entity'},{f:'paid_from',l:'Paid From'},{f:'funding',l:'Initial Funding',fmt:'currency'},
       {f:'interest',l:'Cum. Interest',fmt:'currency'},{f:'fee',l:'Cum. Fees',fmt:'currency'},
       {f:'repay',l:'Cum. Repayments',fmt:'currency'},{f:'outstanding',l:'Outstanding',fmt:'currency'},
     ];
@@ -580,7 +580,7 @@ class Dashboard{
     const cols = [
       {l:'Property', render:r=>r.property||'-'},
       {l:'Entity', render:r=>r.entity||'-'},
-      {l:'Lender', render:r=>r.lender||'-'},
+      {l:'Paid From', render:r=>r.paid_from||'-'},
       {l:'Loan A/C #', render:r=>r.loan_account ? r.loan_account.replace(/\.0$/,'') : '-'},
       {l:'Interest Rate', render:r=>r.interest_rate!=null ? fmt(r.interest_rate*100,'percent') : '-'},
       {l:'Balance (Manual)', render:r=>r.manual_outstanding!=null ? fmt(r.manual_outstanding,'currency') : '-'},
